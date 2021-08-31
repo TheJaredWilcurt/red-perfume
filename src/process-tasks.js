@@ -11,33 +11,19 @@ const css = require('./css.js');
 const html = require('./html.js');
 
 /**
- * Runs a callback hook if it exists.
- *
- * @param {object} options        The user's options object
- * @param {object} hookContainer  The object that has a key of hooks
- * @param {string} hook           The hook to run
- * @param {object} data           The data to pass in to the callback
- */
-function runHook (options, hookContainer, hook, data) {
-  if (hookContainer.hooks && hookContainer.hooks[hook]) {
-    hookContainer.hooks[hook](options, data);
-  }
-}
-
-/**
  * Based on task settings concatenate all CSS inputs
  * into one string.
  *
- * @param  {object} options      The user's options object
- * @param  {object} taskStyles   Style settings for this task
- * @param  {object} styleErrors  Array to store style related errors
- * @return {string}              The CSS String
+ * @param  {object} options     The user's options object
+ * @param  {object} taskStyles  Style settings for this task
+ * @return {object}             The CSS String and any style errors
  */
-function getCssString (options, taskStyles, styleErrors) {
+function getCssString (options, taskStyles) {
   let cssString = '';
+  let styleErrors = [];
 
   if (taskStyles.in) {
-    taskStyles.in.forEach(function (file) {
+    taskStyles.in.forEach((file) => {
       try {
         cssString = cssString + String(fs.readFileSync(file));
       } catch (err) {
@@ -50,19 +36,19 @@ function getCssString (options, taskStyles, styleErrors) {
     cssString = cssString + taskStyles.data;
   }
 
-  return cssString;
+  return { cssString, styleErrors };
 }
 
 /**
  * Based on task settings produce an HTML string.
  *
- * @param  {object} options       The user's options object
- * @param  {object} item          Contains in/out/data/hooks for one HTML file
- * @param  {Array}  markupErrors  Array to store markup related errors
- * @return {string}               The HTML String
+ * @param  {object} options  The user's options object
+ * @param  {object} item     Contains in/out/data/result for one HTML file
+ * @return {object}          The HTML String and any markup errors
  */
-function getHtmlString (options, item, markupErrors) {
+function getHtmlString (options, item) {
   let markupString = '';
+  let markupErrors = [];
   if (item.in) {
     try {
       markupString = markupString + String(fs.readFileSync(item.in));
@@ -74,33 +60,39 @@ function getHtmlString (options, item, markupErrors) {
   if (item.data) {
     markupString = markupString + item.data;
   }
-  return markupString;
+  return { markupString, markupErrors };
 }
 
 /**
- * Saves styles to disk.
+ * Saves styles to disk and/or runs the result callback.
  *
- * @param {object} options      The user's options object
- * @param {object} taskStyles   Style settings for this task
- * @param {object} atomizedCss  The atomized classes
- * @param {Array}  styleErrors  Array of errors that happened during style processing/saving
+ * @param {object} options          The user's options object
+ * @param {object} taskStyles       Style settings for this task
+ * @param {object} processedStyles  The map of original CSS class names to atomized classes
+ * @param {Array}  styleErrors      Array of errors that happened during style processing/saving
  */
-function outputAtomizedCSS (options, taskStyles, atomizedCss, styleErrors) {
+function outputAtomizedCSS (options, taskStyles, processedStyles, styleErrors) {
   if (taskStyles.out) {
     try {
-      fs.writeFileSync(taskStyles.out, atomizedCss + '\n');
+      fs.writeFileSync(taskStyles.out, processedStyles.output + '\n');
     } catch (err) {
       helpers.throwError(options, 'Error writing CSS file: ' + taskStyles.out, err);
       styleErrors.push(err);
     }
   }
+  if (taskStyles.result) {
+    if (!styleErrors.length) {
+      styleErrors = undefined;
+    }
+    taskStyles.result(processedStyles.output, styleErrors);
+  }
 }
 
 /**
- * Saves markup to disk.
+ * Saves markup to disk and/or runs the result callback.
  *
  * @param {object} options          The user's options object
- * @param {object} item             The in/out/data/hooks object for this markup file
+ * @param {object} item             The in/out/data/result object for this markup file
  * @param {string} processedMarkup  The modified markup with atomized classes
  * @param {Array}  markupErrors     Array of errors that happened during markup processing/saving
  */
@@ -113,100 +105,76 @@ function outputAtomizedHTML (options, item, processedMarkup, markupErrors) {
       markupErrors.push(err);
     }
   }
+  if (item.result) {
+    if (!markupErrors.length) {
+      markupErrors = undefined;
+    }
+    item.result(processedMarkup, markupErrors);
+  }
 }
 
 /**
- * Saves the JSON to disk.
+ * Saves the JSON to disk and/or runs the result callback.
  *
- * @param  {object} options      The user's options object
- * @param  {object} taskScripts  Script settings for this task
- * @param  {object} classMap     The map of original CSS class names to atomized classes
- * @return {Array}               Script errors
+ * @param {object} options          The user's options object
+ * @param {object} taskScripts      Script settings for this task
+ * @param {object} processedStyles  The map of original CSS class names to atomized classes
  */
-function outputAtomizedJSON (options, taskScripts, classMap) {
-  let scriptErrors = [];
+function outputAtomizedJSON (options, taskScripts, processedStyles) {
+  let scriptErrors;
   if (taskScripts.out) {
     try {
-      fs.writeFileSync(taskScripts.out, JSON.stringify(classMap, null, 2) + '\n');
+      fs.writeFileSync(taskScripts.out, JSON.stringify(processedStyles.classMap, null, 2) + '\n');
     } catch (scriptErr) {
       helpers.throwError(options, 'Error writing script file: ' + taskScripts.out, scriptErr);
-      scriptErrors.push(scriptErr);
+      scriptErrors = scriptErr;
     }
   }
-  return scriptErrors;
+  if (taskScripts.result) {
+    taskScripts.result(processedStyles.classMap, scriptErrors);
+  }
 }
 
 /**
  * Retrieves CSS string based on options.
  * Atomizes and uglifies CSS.
- * Outputs CSS to file and/or calls life cycle callback hooks.
+ * Outputs CSS to file and/or callback.
  *
- * @param  {object} options  The user's options object
- * @param  {object} task     The task with all settings
- * @return {object}          The map of original CSS class names to atomized classes & errors
+ * @param {object} options          The user's options object
+ * @param {object} task             The task with all settings
+ * @param {object} processedStyles  The map of original CSS class names to atomized classes
  */
-function processStyles (options, task) {
-  runHook(options, task.styles, 'beforeRead', { task });
-  const styleErrors = [];
-  const inputCss = getCssString(options, task.styles, styleErrors);
-  runHook(options, task.styles, 'afterRead', { task, inputCss, styleErrors });
+function processStyles (options, task, processedStyles) {
+  const cssData = getCssString(options, task.styles);
 
-  const processedStyles = css(options, inputCss, task.uglify, styleErrors);
-  const atomizedCss = processedStyles.atomizedCss;
-  const classMap = processedStyles.classMap;
-  runHook(options, task.styles, 'afterProcessed', { task, inputCss, atomizedCss, classMap, styleErrors });
+  const hasStyleFiles = task.styles.in && task.styles.in.length;
+  if (hasStyleFiles || task.styles.data) {
+    processedStyles = css(options, cssData.cssString, task.uglify);
+  }
 
-  outputAtomizedCSS(options, task.styles, atomizedCss, styleErrors);
-  runHook(options, task.styles, 'afterOutput', { task, inputCss, atomizedCss, classMap, styleErrors });
-
-  return { inputCss, atomizedCss, classMap, styleErrors };
+  outputAtomizedCSS(options, task.styles, processedStyles, cssData.styleErrors);
 }
 
 /**
  * Retrieves HTML string based on options.
  * Replaces atomized class names in markup.
- * Outputs HTML to file and/or calls life cycle callback hooks.
+ * Outputs HTML to file and/or callback.
  *
- * @param  {object} options   The user's options object
- * @param  {object} task      The task with all settings
- * @param  {object} classMap  The map of original CSS class names to atomized classes
- * @return {Array}            Array of the atomized markup strings from each item.
+ * @param {object} options          The user's options object
+ * @param {object} task             The task with all settings
+ * @param {object} processedStyles  The map of original CSS class names to atomized classes
  */
-function processMarkup (options, task, classMap) {
-  const allAtomizedMarkup = [];
-  const allInputMarkup = [];
-  const markupErrors = [];
-  task.markup.forEach(function (subTask) {
-    runHook(options, subTask, 'beforeRead', { task, subTask, classMap });
-    const inputHtml = getHtmlString(options, subTask, markupErrors);
-    runHook(options, subTask, 'afterRead', { task, subTask, classMap, inputHtml, markupErrors });
+function processMarkup (options, task, processedStyles) {
+  task.markup.forEach(function (item) {
+    const htmlData = getHtmlString(options, item);
 
-    const atomizedHtml = html(options, inputHtml, classMap, markupErrors);
-    runHook(options, subTask, 'afterProcessed', { task, subTask, classMap, inputHtml, atomizedHtml, markupErrors });
+    let processedMarkup = '';
+    if (item.in || item.data) {
+      processedMarkup = html(options, htmlData.markupString, processedStyles.classMap);
+    }
 
-    outputAtomizedHTML(options, subTask, atomizedHtml, markupErrors);
-    runHook(options, subTask, 'afterOutput', { task, subTask, classMap, inputHtml, atomizedHtml, markupErrors });
-
-    allInputMarkup.push(inputHtml);
-    allAtomizedMarkup.push(atomizedHtml);
+    outputAtomizedHTML(options, item, processedMarkup, htmlData.markupErrors);
   });
-  return { allInputMarkup, allAtomizedMarkup, markupErrors };
-}
-
-/**
- * Ouputs atomized CSS to original class name JSON map
- * to file and/or calls life cycle callback hooks.
- *
- * @param  {object} options   The user's options object
- * @param  {object} task      The task with all settings
- * @param  {object} classMap  The map of original CSS class names to atomized classes
- * @return {object}           Object containing script errors
- */
-function processScripts (options, task, classMap) {
-  runHook(options, task.scripts, 'beforeOutput', { task, classMap });
-  const scriptErrors = outputAtomizedJSON(options, task.scripts, classMap);
-  runHook(options, task.scripts, 'afterOutput', { task, classMap, scriptErrors });
-  return { scriptErrors };
 }
 
 /**
@@ -216,36 +184,21 @@ function processScripts (options, task, classMap) {
  * @example
  * processTask(options, task);
  *
- * @param  {object} options  The user's options object
- * @param  {object} task     The task with all settings
- * @return {object}          All the variables to be emitted from final callback hook
+ * @param {object} options  The user's options object
+ * @param {object} task     The task with all settings
  */
 function processTask (options, task) {
-  runHook(options, task, 'beforeTask', { task });
+  let processedStyles = {};
 
-  let inputCss;
-  let atomizedCss;
-  let classMap;
-  let styleErrors;
   if (task.styles) {
-    ({ inputCss, atomizedCss, classMap, styleErrors } = processStyles(options, task));
+    processStyles(options, task, processedStyles);
   }
-
-  let allInputMarkup;
-  let allAtomizedMarkup;
-  let markupErrors;
   if (task.markup) {
-    ({ allInputMarkup, allAtomizedMarkup, markupErrors } = processMarkup(options, task, classMap));
+    processMarkup(options, task, processedStyles);
   }
-
-  let scriptErrors;
   if (task.scripts) {
-    ({ scriptErrors } = processScripts(options, task, classMap));
+    outputAtomizedJSON(options, task.scripts, processedStyles);
   }
-
-  const finalOutput = { task, inputCss, atomizedCss, classMap, allInputMarkup, allAtomizedMarkup, styleErrors, markupErrors, scriptErrors };
-  runHook(options, task, 'afterTask', finalOutput);
-  return finalOutput;
 };
 
 /**
@@ -255,19 +208,15 @@ function processTask (options, task) {
  * @example
  * processTasks(options);
  *
- * @param  {object} options  The user's options object
- * @return {object}          All the variables to be emitted from final callback hook
+ * @param {object} options  The user's options object
  */
 function processTasks (options) {
   options = options || {};
   options.tasks = options.tasks || [];
 
-  const finalOutputs = [];
   options.tasks.forEach(function (task) {
-    finalOutputs.push(processTask(options, task));
+    processTask(options, task);
   });
-
-  return finalOutputs;
 }
 
 module.exports = processTasks;

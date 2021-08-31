@@ -92,16 +92,17 @@ function updateClassMap (classMap, selectors, encodedClassName) {
  * Ensure that non-classes are not atomized,
  * but still included in the output.
  *
- * @param {object} rule      Parsed CSS Rule
- * @param {object} newRules  Object containing all unique rules
+ * @param  {object} rule  Parsed CSS Rule
+ * @return {object}       New CSS rule as AST, newRule
  */
-function handleNonClasses (rule, newRules) {
+function handleNonClasses (rule) {
   let originalSelectorName = rule.selectors[0][0].original;
-  newRules[originalSelectorName] = {
+  const newRule = {
     type: 'rule',
-    selectors: [[originalSelectorName]],
+    selectors: [[{ original: originalSelectorName }]],
     declarations: rule.declarations
   };
+  return newRule;
 }
 
 /**
@@ -117,13 +118,32 @@ function handleNonClasses (rule, newRules) {
  * @param {Array}  styleErrors  Array of style related errors
  */
 function encodeDeclarationAsClassname (options, rule, declaration, classMap, newRules, styleErrors) {
-  /* An encoded class name look like:
-    .rp__padding__--COLON10px
-  */
-  let encodedClassName = encodeClassName(options, declaration, styleErrors);
-
   // Array of comma separated selectors on a specific rule
   const ruleSelectors = rule.selectors;
+  const type = ruleSelectors[0][0].type;
+  const isClass = ruleSelectors[0].find(function (selector) {
+    return selector.name === 'class';
+  });
+  let encodedClassName = '';
+  let encodedName = '';
+  if (!isClass) {
+    encodedName = ruleSelectors[0][0].original;
+  } else {
+    /* An encoded class name look like:
+      .rp__padding__--COLON10px
+    */
+    encodedClassName = encodeClassName(options, declaration, styleErrors);
+    if (type === 'tag') {
+      encodedName = name + encodedClassName;
+    }
+  }
+
+  if (ruleSelectors[0][1] && ruleSelectors[0][1].type && ruleSelectors[0][1].type === 'pseudo') {
+    let pseudoName = ruleSelectors[0][1].name;
+    // .rp__display__--COLONblock___-HOVER:hover
+    let pseudoClassName = encodedClassName + '___-' + pseudoName.toUpperCase() + ':' + pseudoName;
+    encodedClassName = pseudoClassName;
+  }
 
   // Each selector is made up of parts like .cow.dog:hover:after would be an array of 4 objects for each part
   ruleSelectors.forEach(function (selectorParts) {
@@ -139,11 +159,11 @@ function encodeDeclarationAsClassname (options, rule, declaration, classMap, new
     // .rp__display__--COLONblock___-HOVER___-AFTER:hover:after
     encodedClassName = encodedClassName + encodedPseudoNames.join('') + pseudoNames.join('');
 
-    classMap = updateClassMap(classMap, rule.selectors, encodedClassName);
+    classMap = updateClassMap(classMap, ruleSelectors, encodedClassName);
 
     newRules[encodedClassName] = {
       type: 'rule',
-      selectors: [[encodedClassName]],
+      selectors: [[encodedName || encodedClassName]],
       declarations: [declaration]
     };
   });

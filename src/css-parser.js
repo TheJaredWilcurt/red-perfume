@@ -15,20 +15,20 @@ const helpers = require('./helpers.js');
  * data that is not of use for us and just clouds up the console
  * logs during development.
  *
- * @param {any} item  Parsed CSS or a portion of it
+ * @param {any} rule  Parsed CSS or a portion of it
  */
-function recursivelyRemovePosition (item) {
-  if (Array.isArray(item)) {
-    item.forEach(function (subItem) {
-      recursivelyRemovePosition(subItem);
+function recursivelyRemovePosition (rule) {
+  if (Array.isArray(rule)) {
+    rule.forEach(function (subRule) {
+      recursivelyRemovePosition(subRule);
     });
   }
-  if (item && typeof(item) === 'object' && !Array.isArray(item)) {
-    if (item.hasOwnProperty('position')) {
-      delete item.position;
+  if (rule && typeof(rule) === 'object' && !Array.isArray(rule)) {
+    if (rule.hasOwnProperty('position')) {
+      delete rule.position;
     }
-    Object.keys(item).forEach(function (key) {
-      recursivelyRemovePosition(item[key]);
+    Object.keys(rule).forEach(function (key) {
+      recursivelyRemovePosition(rule[key]);
     });
   }
 }

@@ -48,9 +48,10 @@ function cleanDocument (document) {
  * @param  {object}    node            An HTML node as AST
  * @param  {string}    classToReplace  A string to find and replace
  * @param  {Array}     newClasses      Array of strings that will replace the given class
+ * @param  {string}    tag             HTML tag name ('h1', 'section', 'footer', etc)
  * @return {undefined}                 Just mutates the AST. Nothing returned
  */
-function replaceSemanticClassWithAtomizedClasses (node, classToReplace, newClasses) {
+function replaceSemanticClassWithAtomizedClasses (node, classToReplace, newClasses, tag) {
   /* An example of a Node:
     {
       nodeName: 'h1',
@@ -76,24 +77,26 @@ function replaceSemanticClassWithAtomizedClasses (node, classToReplace, newClass
         // 'cool cat nice wow' => ['cool','cat','nice','wow']
         let classes = attribute.value.split(' ');
         if (classes.includes(classToReplace)) {
-          // ['cool','cat','nice','wow'] => ['cool','nice','wow']
-          classes = classes.filter(function (className) {
-            return className !== classToReplace;
-          });
-          // ['cool','cat','nice','wow','rp__4','rp__8']
-          classes = [
-            ...classes,
-            ...newClasses
-          ];
-          // 'cool cat nice wow rp__4 rp__8'
-          attribute.value = classes.join(' ');
+          if (!tag || node.tagName === tag) {
+            // ['cool','cat','nice','wow'] => ['cool','nice','wow']
+            classes = classes.filter(function (className) {
+              return className !== classToReplace;
+            });
+            // ['cool','cat','nice','wow','rp__4','rp__8']
+            classes = [
+              ...classes,
+              ...newClasses
+            ];
+            // 'cool cat nice wow rp__4 rp__8'
+            attribute.value = classes.join(' ');
+          }
         }
       }
     });
   }
   if (node.childNodes) {
     node.childNodes.forEach(function (child) {
-      replaceSemanticClassWithAtomizedClasses(child, classToReplace, newClasses);
+      replaceSemanticClassWithAtomizedClasses(child, classToReplace, newClasses, tag);
     });
   }
 }
@@ -124,10 +127,16 @@ const html = function (options, input, classMap, markupErrors) {
     atomizedClasses = atomizedClasses.map(function (atomic) {
       return atomic.replace('.', '');
     });
+
+    let tag = '';
     if (semanticClass.startsWith('.')) {
       semanticClass = semanticClass.replace('.', '');
+    } else {
+      const classAndTag = semanticClass.split('.');
+      tag = classAndTag[0];
+      semanticClass = classAndTag[1];
     }
-    replaceSemanticClassWithAtomizedClasses(document, semanticClass, atomizedClasses);
+    replaceSemanticClassWithAtomizedClasses(document, semanticClass, atomizedClasses, tag);
   });
 
   // Object => string
