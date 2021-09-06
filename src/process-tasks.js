@@ -126,8 +126,12 @@ function outputAtomizedHTML (options, item, processedMarkup, markupErrors) {
 function outputAtomizedJSON (options, taskScripts, classMap) {
   let scriptErrors = [];
   if (taskScripts.out) {
+    let indentation = 2;
+    if (taskScripts.minify) {
+      indentation = null;
+    }
     try {
-      fs.writeFileSync(taskScripts.out, JSON.stringify(classMap, null, 2) + '\n');
+      fs.writeFileSync(taskScripts.out, JSON.stringify(classMap, null, indentation) + '\n');
     } catch (scriptErr) {
       helpers.throwError(options, 'Error writing script file: ' + taskScripts.out, scriptErr);
       scriptErrors.push(scriptErr);
@@ -151,7 +155,7 @@ function processStyles (options, task) {
   const inputCss = getCssString(options, task.styles, styleErrors);
   runHook(options, task.styles, 'afterRead', { task, inputCss, styleErrors });
 
-  const processedStyles = css(options, inputCss, task.uglify, styleErrors);
+  const processedStyles = css(options, task, inputCss, styleErrors);
   const atomizedCss = processedStyles.atomizedCss;
   const classMap = processedStyles.classMap;
   runHook(options, task.styles, 'afterProcessed', { task, inputCss, atomizedCss, classMap, styleErrors });
@@ -181,7 +185,7 @@ function processMarkup (options, task, classMap) {
     const inputHtml = getHtmlString(options, subTask, markupErrors);
     runHook(options, subTask, 'afterRead', { task, subTask, classMap, inputHtml, markupErrors });
 
-    const atomizedHtml = html(options, inputHtml, classMap, markupErrors);
+    const atomizedHtml = html(options, { input: inputHtml, classMap, markupErrors, minify: subTask.minify });
     runHook(options, subTask, 'afterProcessed', { task, subTask, classMap, inputHtml, atomizedHtml, markupErrors });
 
     outputAtomizedHTML(options, subTask, atomizedHtml, markupErrors);
